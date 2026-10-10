@@ -1,0 +1,88 @@
+// Cột hình học (geometry) dùng PostGIS, khai báo Unsupported và truy vấn bằng $queryRaw.
+// Extension postgis KHÔNG khai báo ở đây (image postgis/postgis tự cài thêm extension khác → Prisma báo drift);
+// nó được tạo bằng CREATE EXTENSION trong migration đầu tiên.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Đoạn đường (một tên đường có thể gồm nhiều đoạn) — nguồn OpenStreetMap
+model StreetSegment {
+  id          String   @id @default(cuid())
+  osmId       BigInt   @unique
+  name        String
+  district    String
+  ward        String?
+  geom        Unsupported("geometry(LineString, 4326)")
+  elevationM  Float?   /// cao độ trung bình (m)
+  floodPoints FloodPoint[]
+  predictions FloodPrediction[]
+  reports     FloodReport[]
+
+  @@index([name])
+  @@index([district])
+}
+
+/// Điểm ngập lịch sử (danh sách điểm ngập của TP.HCM)
+model FloodPoint {
+  id           String   @id @default(cuid())
+  segmentId    String?
+  segment      StreetSegment? @relation(fields: [segmentId], references: [id])
+  description  String
+  cause        String   /// RAIN | TIDE | BOTH
+  maxDepthCm   Int?
+  geom         Unsupported("geometry(Point, 4326)")
+}
+
+/// Dự báo mưa theo giờ cho một ô lưới
+model WeatherForecast {
+  id         String   @id @default(cuid())
+  gridKey    String   /// "lat,lng" làm tròn
+  forecastAt DateTime
+  rainMm     Float
+  fetchedAt  DateTime @default(now())
+
+  @@unique([gridKey, forecastAt])
+}
+
+/// Mực nước triều dự báo (trạm Phú An / Nhà Bè)
+model TideForecast {
+  id         String   @id @default(cuid())
+  station    String
+  forecastAt DateTime
+  levelCm    Float
+
+  @@unique([station, forecastAt])
+}
+
+/// Kết quả dự đoán ngập theo đoạn đường, theo khung giờ
+model FloodPrediction {
+  id         String   @id @default(cuid())
+  segmentId  String
+  segment    StreetSegment @relation(fields: [segmentId], references: [id])
+  validAt    DateTime
+  riskScore  Float    /// 0..1
+  riskLevel  String   /// NONE | LOW | MEDIUM | HIGH
+  depthCmEst Int?
+  factors    Json     /// giải thích: { rain, tide, history, elevation }
+  modelVer   String
+  createdAt  DateTime @default(now())
+
+  @@unique([segmentId, validAt, modelVer])
+  @@index([validAt])
+}
+
+/// Báo cáo ngập từ người dùng
+model FloodReport {
+  id         String   @id @default(cuid())
+  segmentId  String?
+  segment    StreetSegment? @relation(fields: [segmentId], references: [id])
+  depthCm    Int
+  note       String?
+  geom       Unsupported("geometry(Point, 4326)")
+  reportedAt DateTime @default(now())
+}
